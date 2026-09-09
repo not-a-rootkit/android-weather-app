@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.22.1)
-project("nativehelper")
+project(nativehelper)
 
 add_library(nativehelper SHARED nativehelper.c)
 find_library(log-lib log)

