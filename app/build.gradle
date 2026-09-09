@@ -31,6 +31,10 @@ android {
         }
     }
 
+    packagingOptions {
+        pickFirst 'lib/x86_64/libnativehelper.so'
+    }
+
     buildTypes {
         release {
             minifyEnabled false
