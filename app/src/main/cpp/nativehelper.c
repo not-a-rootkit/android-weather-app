@@ -1,5 +1,6 @@
 #include <jni.h>
 #include <string.h>
+#include <stdio.h>
 
 JNIEXPORT jstring JNICALL
 Java_com_weatherapp_MainActivity_getWeatherData(JNIEnv *env, jclass cls, jstring location) {
